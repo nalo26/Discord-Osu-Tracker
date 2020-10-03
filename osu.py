@@ -1,4 +1,4 @@
-key='72fe90f9c09ecb6e5d0ba07aa8ada9d264f63f9f'
+key='YOUR OSU KEY HERE'
 import sys, os
 import json
 from jsondiff import diff
