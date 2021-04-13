@@ -31,10 +31,8 @@ def write_json(path, content) -> None:
     mf.close()
 
 
-from osu import get_player_info as osu_get_player_info
-from osu import get_user_best as osu_get_user_best
-from quaver import get_player_info as quaver_get_player_info
-from quaver import get_user_best as quaver_get_user_best
+from osu import get_player_info
+from osu import get_user_best
 
 def is_admin(user_id) -> bool:
     return (str(user_id) in read_txt('ADMINS'))
@@ -59,7 +57,7 @@ def add_user(user, mode, channel) -> None:
     raw_player['pp'] = float(user['pp_raw'])
     raw_player['acc'] = float(user['accuracy'])
     raw_player['channel'] = channel
-    raw_player['plays'] = osu_get_user_best(player, mode) if mode != "quaver" else quaver_get_user_best(player)
+    raw_player['plays'] = get_user_best(player, mode)
     data[mode][player] = raw_player
     write_json('PLAYERS.json', data)
 
@@ -67,7 +65,7 @@ def update_players() -> None:
     data = read_json('PLAYERS.json')
     for mode in data:
         for player in data[mode]:
-            user = osu_get_player_info(player, mode) if mode != "quaver" else quaver_get_player_info(player)
+            user = get_player_info(player, mode)
             data[mode][player]['name'] = user['username']
             data[mode][player]['rank'] = int(user['pp_rank'])
             data[mode][player]['pp'] = float(user['pp_raw'])

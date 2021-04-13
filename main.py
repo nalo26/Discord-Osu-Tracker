@@ -5,7 +5,6 @@ import jsondiff
 
 import utils
 import osu
-import quaver
 
 client = commands.Bot(command_prefix = '!')
 
@@ -37,13 +36,13 @@ async def track(ctx, *argv) -> None:
     if mode == "":
         await ctx.send(":x: Veuillez préciser un mode de jeu ! (`-m <mode>`)")
         return
-    if mode not in utils.MODES_IND and mode != "quaver":
+    if mode not in utils.MODES_IND:
         await ctx.send(f":x: Le mode de jeu `{mode}` n'existe pas !")
         return
-    if (mode != "quaver" and not osu.check_user_exists(user, mode)) or (mode == "quaver" and not quaver.check_user_exists(user)):
+    if not osu.check_user_exists(user, mode):
         await ctx.send(f":x: Le joueur `{user}` n'existe pas !")
         return
-    player = osu.get_player_info(user, mode) if mode != "quaver" else quaver.get_player_info(user)
+    player = osu.get_player_info(user, mode)
     if utils.already_tracked(player['user_id'], mode):
         await ctx.send(f":clipboard: Le joueur `{user}` est déjà dans la tracklist `{mode}` !")
         return
@@ -73,10 +72,10 @@ async def trackdel(ctx, *argv) -> None:
     if mode not in utils.MODES_IND and mode != "quaver":
         await ctx.send(f":x: Le mode `{mode}` n'existe pas ! ({utils.MODES_IND})")
         return
-    if (mode != "quaver" and not osu.check_user_exists(user, mode)) or (mode == "quaver" and not quaver.check_user_exists(user)):
+    if not osu.check_user_exists(user, mode):
         await ctx.send(f":x: Le joueur `{user}` n'existe pas !")
         return
-    player = osu.get_player_info(user, mode) if mode != "quaver" else quaver.get_player_info(user)
+    player = osu.get_player_info(user, mode)
     if force: client.get_channel(utils.get_user(player['user_id'], mode)['channel']).delete(f"Deleted user '{user}'.")
     utils.delete_user(player['user_id'], mode)
     await ctx.send(f":white_check_mark: Le joueur [`{mode.upper()}`] `{user}` a bien été supprimé !")
@@ -113,12 +112,11 @@ async def profile(ctx, *argv) -> None:
     if mode not in utils.MODES_IND and mode != "quaver":
         if not silent: await ctx.send(f":x: Le mode `{mode}` n'existe pas ! (`{'` / `'.join(utils.MODES_IND)}`)")
         return
-    if (mode != "quaver" and not osu.check_user_exists(user, mode)) or (mode == "quaver" and not quaver.check_user_exists(user)):
+    if not osu.check_user_exists(user, mode):
         if not silent: await ctx.send(f":x: Le joueur `{user}` n'existe pas !")
         return
-    player = osu.get_player_info(user, mode) if mode != "quaver" else quaver.get_player_info(user)
-    if mode != "quaver": await ctx.send(embed = osu.embed_user_info(player, mode))
-    else: await ctx.send(embed = quaver.embed_user_info(player))
+    player = osu.get_player_info(user, mode)
+    await ctx.send(embed = osu.embed_user_info(player, mode))
 
 @client.command(aliases=['map', 'btmp'])
 async def beatmap(ctx, *argv) -> None:
@@ -138,12 +136,11 @@ async def beatmap(ctx, *argv) -> None:
         if mode == "":
             if not silent: await ctx.send(f":x: Le mode `{mode}` n'existe pas ! (`{'` / `'.join(utils.MODES_IND)}`)")
             return
-    if (mode != "quaver" and not osu.check_map_exists(btmp, mode)) or (mode == "quaver" and not quaver.check_map_exists(btmp)):
+    if not osu.check_map_exists(btmp, mode):
         if not silent: await ctx.send(f":x: La map `{btmp}` n'existe pas !")
         return
-    btmp = osu.get_map(btmp, mode) if mode != "quaver" else quaver.get_map(btmp)
-    if mode != "quaver": await ctx.send(embed = osu.embed_map_info(btmp, mode))
-    else: await ctx.send(embed = quaver.embed_map_info(btmp))
+    btmp = osu.get_map(btmp, mode)
+    await ctx.send(embed = osu.embed_map_info(btmp, mode))
     
 @client.command(aliases=['mapset', 'set'])
 async def beatmapset(ctx, *argv) -> None:
@@ -160,12 +157,11 @@ async def beatmapset(ctx, *argv) -> None:
         elif not silent: await ctx.send(":x: Veuillez préciser un mode de jeu !")
     if mode not in utils.MODES_IND and mode != "quaver":
         mode = "quaver" if "quavergame" in mapset else ""
-    if (mode != "quaver" and not osu.check_mapset_exists(mapset, mode)) or (mode == "quaver" and not quaver.check_mapset_exists(mapset)):
+    if not osu.check_mapset_exists(mapset, mode):
         if not silent: await ctx.send(f":x: Le mapset `{mapset}` n'existe pas !")
         return
-    mapset = osu.get_mapset(mapset, mode) if mode != "quaver" else quaver.get_mapset(mapset)
-    if mode != "quaver": await ctx.send(embed = osu.embed_mapset_info(mapset, mode))
-    else: await ctx.send(embed = quaver.embed_mapset_info(mapset))
+    mapset = osu.get_mapset(mapset, mode)
+    await ctx.send(embed = osu.embed_mapset_info(mapset, mode))
 
 @client.command(aliases=['stat'])
 async def stats(ctx) -> None:
@@ -204,25 +200,6 @@ async def on_message(message) -> None:
     if text.startswith('!!'): return
 
     await client.process_commands(message)
-
-    if "quavergame.com" in text and not text.startswith("!"):
-        splited = text.split('/')
-
-        if "quavergame.com/u" in text: # user
-            user = splited[4] if "http" in text else splited[2]
-            if "?mode=" in user: user = user[:-7]
-            await profile(message.channel, "-u", str(user), "-m", "quaver", "-s", "true")
-            return
-        
-        if "quavergame.com/mapset/map" in text or "quavergame.com/mapsets/map" in text: # beatmap
-            btmp = splited[5] if "http" in text else splited[3]
-            await beatmap(message.channel, "-b", str(btmp), "-m", "quaver", "-s", "true")
-            return
-        
-        if "quavergame.com/mapset" in text: # beatmapset
-            mapset = splited[4] if "http" in text else splited[2]
-            await beatmapset(message.channel, "-b", str(mapset), "-m", "quaver", "-s", "true")
-            return
 
     if "osu.ppy.sh" in text and not text.startswith("!"):
         splited = text.split('/')
@@ -273,14 +250,13 @@ async def track_plays() -> None:
             for player in data[mode]:
                 channel = client.get_channel(data[mode][player]['channel'])
                 old_plays = data[mode][player]['plays']
-                new_plays = osu.get_user_best(player, mode) if mode != "quaver" else quaver.get_user_best(player)
+                new_plays = osu.get_user_best(player, mode)
                 if old_plays == new_plays: break # no new top play
                 dif = jsondiff.diff(old_plays, new_plays)
                 if jsondiff.insert not in dif: break
                 play = dif[jsondiff.insert][0]
-                user = osu.get_player_info(player, mode) if mode != "quaver" else quaver.get_player_info(player)
-                if mode != "quaver": await channel.send(embed = osu.embed_play(play[1], play[0]+1, mode, data[mode][player], user))
-                else: await channel.send(embed = quaver.embed_play(play[1], play[0]+1, data[mode][player], user))
+                user = osu.get_player_info(player, mode)
+                await channel.send(embed = osu.embed_play(play[1], play[0]+1, mode, data[mode][player], user))
                 data[mode][player]['plays'] = new_plays
                 data[mode][player]['rank']  = int(user['pp_rank'])
                 data[mode][player]['pp']    = float(user['pp_raw'])
