@@ -1,813 +1,302 @@
-key='YOUR OSU KEY HERE'
-import sys, os
-import json
-from jsondiff import diff
-import jsondiff
-import aiohttp
-import asyncio
 import discord
-import botutils
-import calc
-import stats as vari
-vari.init()
+import requests as rq
+from math import log10
 
-import mania_pp_calc as mania_pp
-import ctb_pp_calc as ctb_pp
-import taiko_pp_calc as taiko_pp
+import calc as std_pp
+import utils
 
-signature = 'Osu! Tracking Bot created by nalo_'
-#mode: std = 0, ctb = 2, mania = 3, taiko = 1
-mode_value = {"std": 0, "taiko": 1, "ctb": 2, "mania": 3}
-reversed_mode_value = ['std', 'taiko', 'ctb', 'mania']
+KEY = utils.read_txt('KEY')
+EMOJIS = utils.read_json('EMOJIS.json')
+ICON_URL = 'https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png'
+BASE_URL = "https://osu.ppy/sh/api"
 
-emojis = {'0': '<:hit_0:542327683858563084>', '50': '<:hit_50:542327689244049410>', '100': '<:hit_100:542327693526433793>', '200': '<:hit_200:542327700048576513>', '300': '<:hit_300:542327701327970344>', 'max': '<:hit_max:542327700400898048>', 'fc': '<:fc:542327030121889792>',
-		  'a': '<:rank_a:542327056025911316>', 'b': '<:rank_b:542327056353198090>', 'c': '<:rank_c:542327049793175552>', 'd': '<:rank_d:542327053710524425>', 's': '<:rank_s:542327053714718720>', 'sh': '<:rank_sh:542327049298378752>', 'x': '<:rank_x:542327056600530975>', 'xh': '<:rank_xh:542327053916176384>',
-		  '4k': '<:mod_4k:542327012296228865>', '5k': '<:mod_5k:542327012254023698>', '6k': '<:mod_6k:542327014980583454>', '7k': '<:mod_7k:542327026300747777>', '8k': '<:mod_8k:542327026342690819>', 
-		  'ap': '<:mod_ap:542327026674171905>', 'dt' : '<:mod_dt:542327029928820736>', 'ez': '<:mod_ez:542327026871304222>', 'fi': '<:mod_fi:542327026896601089>', 'fl': '<:mod_fl:542327026850332702>', 'hd': '<:mod_hd:542327029626961963>', 
-		  'hr': '<:mod_hr:542327029941665795>', 'ht': '<:mod_ht:542327027076956171>', 'nc': '<:mod_nc:542327027299254282>', 'nf': '<:mod_nf:542327029841002498>', 'pf': '<:mod_pf:542327027198590987>', 'rx': '<:mod_rx:542327027382878230>', 
-		  'sd': '<:mod_sd:542327029991735296>', 'so': '<:mod_so:542327030209970186>'}
+def check_user_exists(user, mode) -> bool:
+    return (len(get_player_info(user, mode)) > 1)
 
-async def check_user(user, mode):
-	try:
-		async with aiohttp.ClientSession() as session:
-			async with session.get(f'https://osu.ppy.sh/api/get_user?k={key}&m={str(mode_value[mode])}&u={user}') as r:
-				vari.stats['api_usage'] += 1
-				if len(await r.text()) > 4:
-					return 1
-	except Exception as e:
-		print("In Check user:")
-		print(e)
-		return -1
-	return 0
-	
-async def track_user(user, mode):
-	try:
-		async with aiohttp.ClientSession() as session:
-			async with session.get(f'https://osu.ppy.sh/api/get_user_best?k={key}&m={str(mode_value[mode])}&u={user}&limit=50') as r:
-				vari.stats['api_usage'] += 1
-				raw_r = await r.text()
-				if len(raw_r) > 4:
-					jr = json.loads(raw_r)
-					with open('data/'+mode+'/'+user, 'r') as myfile:
-						jdata = json.load(myfile)
-					if jr != jdata :
-						e = diff(jdata, jr)
-						if jsondiff.insert in e:
-							play = e[jsondiff.insert]
-							with open('data/'+mode+'/'+user, "w") as raw:
-								raw.write(raw_r)
-							return (1,len(e[jsondiff.insert]),play)
-						with open('data/'+mode+'/'+user, "w") as raw:
-							raw.write(raw_r)
-	except Exception as e:
-		print("In Track_user:")
-		print(e)
-		return -1
-	return 0
+def check_map_exists(map_id, mode) -> bool:
+    return (len(get_map(map_id, mode)) > 1)
 
+def check_mapset_exists(mapset_id, mode) -> bool:
+    return (len(get_mapset(mapset_id, mode)) > 1)
 
-async def get_recent(user, mode):
-	try:
-		async with aiohttp.ClientSession() as session:
-			async with session.get(f'https://osu.ppy.sh/api/get_user_recent?k={key}&m={str(mode_value[mode])}&u={user}&limit=20') as r:
-				vari.stats['api_usage'] += 1
-				raw_r = await r.text()
-				if len(raw_r) > 4:
-					jr = json.loads(raw_r)
-					n = 0
-					for i in range(len(jr)):
-							if jr[i-n]['rank'] == 'F':
-								del jr[i-n]
-								n += 1
-					return jr
-				else: return None
-	except Exception as e:
-		print("In get recent:")
-		print(e)
-		return -1
-	return 0
-	
+def get_player_info(user, mode) -> dict:
+    return rq.get(f"{BASE_URL}/get_user?k={KEY}&m={str(utils.MODES_VAL[mode])}&u={user}").json()[0]
 
-async def get_map_mode(map_id):
-	dic_ret = await get_map(map_id, '0')
-	if dic_ret != -1: return 'std', '0'
-	else:
-		dic_ret = await get_map(map_id, '1')
-		if dic_ret != -1: return 'taiko', '1'
-		else:
-			dic_ret = await get_map(map_id, '2')
-			if dic_ret != -1: return 'ctb', '2'
-			else:
-				dic_ret = await get_map(map_id, '3')
-				if dic_ret != -1: return 'mania', '3'
-				else: return -1, -1
+def get_user_best(user, mode) -> list:
+    return rq.get(f"{BASE_URL}/get_user_best?k={KEY}&m={str(utils.MODES_VAL[mode])}&u={user}&limit=50").json()
 
-	
-async def print_play(play, top, user):
-	map = await get_map(str(play['beatmap_id']), '0')
-	url = 'https://osu.ppy.sh/b/'+str(map['beatmap_id'])
-	mods_str, mods_emoj = get_mods(int(play['enabled_mods']))
-	with open('tracked_users_std', 'r') as myfile:
-		tracklist = json.load(myfile)
-		old_user_info = str(tracklist[user]).split('|')
-		old_rank = str(old_user_info[1])
-		old_pp = str(old_user_info[2])
-		new_user_inf, useless = await get_user_info(user, 'std')
-		new_rank = str(new_user_inf['pp_rank'])
-		new_pp = str(new_user_inf['pp_raw'])
-		diff_rank = int(int(old_rank) - int(new_rank))
-		if diff_rank >= 0: diff_rank = str('+'+str(diff_rank))
-		diff_pp = float(float(new_pp) - float(old_pp))
-		if diff_pp >= 0: diff_pp = str('+'+str(diff_pp))
-		diff_pp = str(diff_pp)[:5]
+def get_map(map_id, mode) -> dict:
+    return rq.get(f"{BASE_URL}/get_beatmaps?k={KEY}&b={map_id}&m={str(utils.MODES_VAL[mode])}").json()[0]
 
-	tracklist[user] = str(old_user_info[0])+'|'+str(new_rank)+'|'+str(new_pp)
-	with open('tracked_users_std', 'w') as myfile:
-		json.dump(tracklist, myfile)
+def get_mapset(mapset_id, mode) -> list:
+    return rq.get(f"{BASE_URL}/get_beatmaps?k={KEY}&s={mapset_id}{f'&m={utils.MODES_VAL[mode]}' if mode != '' else ''}")
 
-	if map == -1: return -1
-	try:
-		date = str(compute_time(str(play['date'])))
-		if date == -1: date = str(play['date'])
-		acc = str(compute_acc(str(play['countmiss']), str(play['count50']), '0', str(play['count100']), '0', str(play['count300']), 'std'))
-		if str(acc) == '1.0': acc = '100 %'
-		else: acc = acc[2:][:2]+','+acc[4:][:2]+' %'
-		#time = str(calc_date(str(play['date'])))
-		score = "'".join(str(play['score'])[::-1][i:i+3] for i in range(0, len(str(play['score'])), 3))[::-1]
-		
-		try:
-			ret = await botutils.dl_image("https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg", str(map['beatmapset_id'])+'.jpg', 'm')
-			if ret == -1: raise NameError('Fail dl')
-			chex = botutils.av_color('data/m/'+str(map['beatmapset_id'])+'.jpg')
-			if chex == -1: raise NameError('Fail color calc')
-		except Exception: chex = 0xf44242
-		embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-		
-		if top != -1: embedz.set_author(name='Nouveau top #'+str(top+1)+' standard par '+str(user)+' :')
-		else: embedz.set_author(name='Nouveau récent standard par '+str(user)+' :')
-		embedz.set_thumbnail(url="https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg")
-		
-		embedz.add_field(name='Score', value=str(score)+'\n('+str(diff_rank)+', '+str(diff_pp)+'pp)', inline=True)
-		# embedz.add_field(name='PP', value=str(play['pp'])+'/'+str(calc.map('https://osu.ppy.sh/b/'+str(map['beatmap_id']), mods_str, 100, int(play['maxcombo']), 0)), inline=True)
-		if top != -1: embedz.add_field(name='PP', value=str(play['pp']), inline=True)
-		embedz.add_field(name='Rank', value=emojis[str(play['rank']).lower()], inline=True)
-		embedz.add_field(name='Accuracy', value=str(acc), inline=True)
-		if int(play['perfect']) == 1: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/x'+str(map['max_combo'])+' ('+emojis['fc']+')', inline=True)
-		else: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/x'+str(map['max_combo']), inline=True)
-		try: embedz.add_field(name='Mods', value=str(mods_emoj), inline=True)
-		except Exception: embedz.add_field(name='Mods', value=str(mods_str), inline=True)
-		embedz.add_field(name='Stars', value=str(map['difficultyrating'])[:4]+"☆", inline=True)
-		# embedz.add_field(name='Hits [300/100/50/miss]', value=". . . . .[ "+str(play['count300'])+" / "+str(play['count100'])+" / "+str(play['count50'])+" / "+str(play['countmiss'])+" ]", inline=True)
-		embedz.add_field(name='Hits', value=emojis['300']+' x'+str(play['count300'])+' / '+emojis['100']+' x'+str(play['count100'])+'\n'+emojis['50']+' x'+str(play['count50'])+' / '+emojis['0']+' x'+str(play['countmiss']), inline=True)
-		embedz.add_field(name='Date', value=date+"\n ", inline=True)
+def get_top_play(map_id, mode) -> dict:
+    return rq.get(f"{BASE_URL}/get_scores?k={KEY}&b={map_id}&m={str(utils.MODES_VAL[mode])}&limit=1").json()[0]
 
-		Lmin, Lsec = divmod(int(map['total_length']), 60)
-		Smin, Ssec = divmod(int(map['hit_length']), 60)
-		passvalue = str(pass_value(str(map['passcount']), str(map['playcount'])))
-		info = ""
-		info += "Créateur : `{}` ID : `{}`\n".format(map['creator'], map['beatmap_id'])
-		info += "Durée: `{}:{}` (`{}:{}`)  BPM: `{}`  Combo: `{}`\n".format(Lmin, Lsec, Smin, Ssec, map['bpm'], map['max_combo'])
-		info += "CS: `{}`  AR: `{}`  OD: `{}`  HP: `{}`  Stars: `{}☆`\n".format(map['diff_size'], map['diff_approach'], map['diff_overall'], map['diff_drain'], map['difficultyrating'][:4])
-		# info += "95%: `{}pp` 97%: `{}pp` 99%: `{}pp` 100%: `{}pp`\n".format(calc.map(str(np['url']), str(np['mods']), 95, int(np['combo']), int(np['miss'])), calc.map(str(np['url']), str(np['mods']), 97, int(np['combo']), int(np['miss'])), calc.map(str(np['url']), str(np['mods']), 99, int(np['combo']), int(np['miss'])), calc.map(str(np['url']), str(np['mods']), 100, int(np['combo']), int(np['miss'])))
-		info += "Status: `{}`  Taux de réussite: `{}%`".format(map['approved'], passvalue[:4])
-		embedz.add_field(name='Map info', value=info, inline=True)
-		embedz.set_footer(text = signature, icon_url='https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png')
+def embed_play(play, top, mode, old_user, new_user) -> discord.Embed:
+    beatmap = get_map(play['beatmap_id'], mode)
 
-		if top != -1: print('[std] Play by : '+str(user)+', '+play['pp']+'pp')
-	except Exception as e:
-		print('In Print play:')
-		print(e)
-		return -1
-	return embedz
+    rank_change = "{0:+d}".format(old_user['rank'] - int(new_user['pp_rank']))
+    acc_change  = "{0:+0.2f}%".format(float(new_user['accuracy']) - old_user['acc'])
+    pp_change   = "{0:+0.1f}".format(float(new_user['pp_raw']) - old_user['pp'])
 
-async def print_play_mania(play, top, user):
-	map = await get_map(str(play['beatmap_id']), '3')
-	bestplay = await get_top_play(str(play['beatmap_id']), '3')
-	mode = ''
-	if map == -1:
-		mode = 'mania mode'
-		map = await get_map(str(play['beatmap_id']), '3&a=1')
-		if map == -1:
-			mode = ''
-			return -1		
-	mods_str, mods_emoj = get_mods(int(play['enabled_mods']))
-	with open('tracked_users_mania', 'r') as myfile:
-		tracklist = json.load(myfile)
-		old_user_info = str(tracklist[user]).split('|')
-		old_rank = str(old_user_info[1])
-		old_pp = str(old_user_info[2])
-		new_user_inf, useless = await get_user_info(user, 'mania')
-		new_rank = str(new_user_inf['pp_rank'])
-		new_pp = str(new_user_inf['pp_raw'])
-		diff_rank = int(int(old_rank) - int(new_rank))
-		if diff_rank >= 0: diff_rank = str('+'+str(diff_rank))
-		diff_pp = float(float(new_pp) - float(old_pp))
-		if diff_pp >= 0: diff_pp = str('+'+str(diff_pp))
-		diff_pp = str(diff_pp)[:5]
+    hits = compute_hits((play['countmiss'], play['count50'], play['countkatu'], play['count100'], play['countgeki'], play['count300']), mode)
+    acc = compute_acc((play['countmiss'], play['count50'], play['countkatu'], play['count100'], play['countgeki'], play['count300']), mode)
+    if int(acc) == acc: acc = int(acc)
+    score = "{:,}".format(int(play['score'])).replace(',', "'")
+    maxcombo = beatmap['max_combo'] if mode == 'std' else get_top_play(play['beatmap_id'], mode)['maxcombo']
+    mods, mods_str = compute_mods(int(play['enabled_mods']))
+    objects = int(beatmap['count_normal']) + int(beatmap['count_slider']) + int(beatmap['count_spinner'])
+    if mode == 'std': max_pp = std_pp.map(f"osu.ppy.sh/b/{beatmap['beatmap_id']}", mods, 100, maxcombo, 0, 0, 0)
+    if mode == 'taiko': max_pp = taiko_pp(mods, int(beatmap['difficultyrating']), int(beatmap['diff_overall']), maxcombo, 100, 0)
+    if mode == 'ctb': max_pp = ctb_pp(mods, int(beatmap['difficultyrating']), int(beatmap['diff_approach']), maxcombo, maxcombo, 100, 0)
+    if mode == 'mania': max_pp = mania_pp(mods, int(beatmap['difficultyrating']), int(beatmap['diff_overall']), 1000000, objects)
 
-	# try:
-	date = str(compute_time(str(play['date'])))
-	if date == -1: date = str(play['date'])
-	acc = str(compute_acc(str(play['countmiss']), str(play['count50']), str(play['countkatu']), str(play['count100']), str(play['countgeki']), str(play['count300']), 'mania'))
-	if acc == '1.0': acc = '100 %'
-	else: acc = acc[2:][:2]+','+acc[4:][:2]+' %'
-	#time = str(calc_date(str(play['date'])))
-	score = "'".join(str(play['score'])[::-1][i:i+3] for i in range(0, len(str(play['score'])), 3))[::-1]
-	
-	try:
-		ret = await botutils.dl_image("https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg", str(map['beatmapset_id'])+'.jpg', 'm')
-		if ret == -1: raise NameError('Fail dl')
-		chex = botutils.av_color('data/m/'+str(map['beatmapset_id'])+'.jpg')
-		if chex == -1: raise NameError('Fail color calc')
-		embedz=discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-	except Exception: chex = 0xf44242
+    embed = discord.Embed(title=f"{beatmap['title']} [{beatmap['version']}]", url=f"https://osu.ppy.sh/b/{beatmap['beatmap_id']}")
+    if top != -1: title = f"[{mode.upper()}] {new_user['username']} - Top play #{top}"
+    else: title = f"[{mode.upper()}] {new_user['username']} - Recent play"
+    embed.set_author(name=f"{title} ({rank_change})", icon_url=f"http://s.ppy.sh/a/{new_user['user_id']}")
+    embed.set_thumbnail(url=f"https://b.ppy.sh/thumb/{beatmap['beatmapset_id']}l.jpg")
 
-	if mode == 'mania mode': embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"] ["+mode+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-	else: embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-	if top != -1: embedz.set_author(name='Nouveau top #'+str(top+1)+' mania par '+str(user)+' :')
-	else: embedz.set_author(name='Nouveau récent mania par '+str(user)+' :')
-	embedz.set_thumbnail(url="https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg")
-	
-	embedz.add_field(name='Score', value=str(score)+'\n('+str(diff_rank)+', '+str(diff_pp)+'pp)', inline=True)
-	if top != -1: embedz.add_field(name='PP', value=str(play['pp']), inline=True)
-	embedz.add_field(name='Rank', value=emojis[str(play['rank']).lower()], inline=True)
-	embedz.add_field(name='Accuracy', value=str(acc), inline=True)
-	if int(play['perfect']) == 1: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/≈x'+str(bestplay['maxcombo'])+' ('+emojis['fc']+')', inline=True)
-	else: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/≈x'+str(bestplay['maxcombo']), inline=True)
-	try: embedz.add_field(name='Mods', value=str(mods_emoj), inline=True)
-	except Exception: embedz.add_field(name='Mods', value=str(mods_str), inline=True)
-	embedz.add_field(name='Stars', value=str(map['difficultyrating'])[:4]+"☆", inline=True)
-	# embedz.add_field(name='[Max/300/200/100/50/miss]', value="["+str(play['countgeki'])+"/"+str(play['count300'])+"/"+str(play['countkatu'])+"/"+str(play['count100'])+"/"+str(play['count50'])+"/"+str(play['countmiss'])+"]", inline=True)
-	# embedz.add_field(name='Hits', value=emojis['max']+' x'+str(play['countgeki'])+' / '+emojis['300']+' x'+str(play['count300'])+'\n'+emojis['200']+' x'+str(play['countkatu'])+' / '+emojis['100']+' x'+str(play['count100'])+'\n'+emojis['50']+' x'+str(play['count50'])+' / '+emojis['0']+' x'+str(play['countmiss']), inline=True)
-	embedz.add_field(name='Hits (ratio: {})'.format(str(int(play['countgeki'])/int(play['count300']))[:4]), value=emojis['300']+' x'+str(play['count300'])+' / '+emojis['max']+' x'+str(play['countgeki'])+'\n'+emojis['200']+' x'+str(play['countkatu'])+' / '+emojis['100']+' x'+str(play['count100'])+'\n'+emojis['50']+' x'+str(play['count50'])+' / '+emojis['0']+' x'+str(play['countmiss']), inline=True)
-	embedz.add_field(name='Date', value=date+"\n", inline=True)
+    embed.add_field(name="Score", value=score)
+    embed.add_field(name="PP", value=f"{round(float(play['pp']), 2)}/{max_pp}\n({pp_change})")
+    embed.add_field(name="Rank", value=EMOJIS[play['rank'].lower()])
+    embed.add_field(name="Accuracy", value=f"{acc} % ({acc_change})")
+    embed.add_field(name="Combo", value=f"x{play['maxcombo']}/x{('≈' if mode != 'std' else '') + maxcombo}")
+    embed.add_field(name="Mods", value=mods_str)
+    embed.add_field(name="Stars", value=f"{round(float(beatmap['difficultyrating']), 2)}☆")
+    embed.add_field(name="Hits", value=hits)
+    embed.add_field(name='Map info', value=compute_map_info(beatmap, mode, maxcombo), inline=False)
 
-	Lmin, Lsec = divmod(int(map['total_length']), 60)
-	Smin, Ssec = divmod(int(map['hit_length']), 60)
-	passvalue = str(pass_value(str(map['passcount']), str(map['playcount'])))
-	info = ""
-	info += "Créateur : `{}` ID : `{}`\n".format(map['creator'], map['beatmap_id'])
-	info += "Durée: `{}:{}` (`{}:{}`)  BPM: `{}`  Combo: `≈{}`\n".format(Lmin, Lsec, Smin, Ssec, map['bpm'], bestplay['maxcombo'])
-	info += "Keys: `{}`  OD: `{}`  HP: `{}`  Stars: `{}☆`\n".format(map['diff_size'], map['diff_overall'], map['diff_drain'], map['difficultyrating'][:4])
-	info += "Status: `{}`  Taux de réussite: `{}%`".format(map['approved'], passvalue[:4])
-	embedz.add_field(name='Map info', value=info, inline=True)
-	embedz.set_footer(text = signature, icon_url='https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png')
+    embed.set_footer(text="Score obtenu le/à", icon_url=ICON_URL)
+    embed.timestamp = utils.compute_time(play['date'])
 
-	tracklist[user] = str(old_user_info[0])+'|'+str(new_rank)+'|'+str(new_pp)
-	with open('tracked_users_mania', 'w') as myfile:
-		json.dump(tracklist, myfile)
-	if top != -1: print('[mania] Play by : '+str(user)+', '+play['pp']+'pp')
-	# except Exception as e:
-	# 	print('In Print play:')
-	# 	print(e)
-	# 	return -1
-	return embedz
+    return embed
 
-async def print_play_ctb(play, top, user):
-	map = await get_map(str(play['beatmap_id']), '2')
-	bestplay = await get_top_play(str(play['beatmap_id']), '2')
-	mode = ''
-	if map == -1:
-		mode = 'CTB mode'
-		map = await get_map(str(play['beatmap_id']), '2&a=1')
-		if map == -1:
-			mode = ''
-			return -1
-	mods_str, mods_emoj = get_mods(int(play['enabled_mods']))
-	with open('tracked_users_ctb', 'r') as myfile:
-		tracklist = json.load(myfile)
-		old_user_info = str(tracklist[user]).split('|')
-		old_rank = str(old_user_info[1])
-		old_pp = str(old_user_info[2])
-		new_user_inf, useless = await get_user_info(user, 'ctb')
-		new_rank = str(new_user_inf['pp_rank'])
-		new_pp = str(new_user_inf['pp_raw'])
-		diff_rank = int(int(old_rank) - int(new_rank))
-		if diff_rank >= 0: diff_rank = str('+'+str(diff_rank))
-		diff_pp = float(float(new_pp) - float(old_pp))
-		if diff_pp >= 0: diff_pp = str('+'+str(diff_pp))
-		diff_pp = str(diff_pp)[:5]
+def embed_user_info(user, mode) -> discord.Embed:
+    embed = discord.Embed()
 
-	try:
-		date = str(compute_time(str(play['date'])))
-		if date == -1: date = str(play['date'])
-		acc = str(compute_acc(str(play['countmiss']), str(play['count50']), str(play['countkatu']), str(play['count100']), str(play['countgeki']), str(play['count300']), 'ctb'))
-		if acc == '1.0': acc = '100 %'
-		else: acc = acc[2:][:2]+','+acc[4:][:2]+' %'
-		# time = str(calc_date(str(play['date'])))
-		score = "'".join(str(play['score'])[::-1][i:i+3] for i in range(0, len(str(play['score'])), 3))[::-1]
-		
-		try:
-			ret = await botutils.dl_image("https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg", str(map['beatmapset_id'])+'.jpg', 'm')
-			if ret == -1: raise NameError('Fail dl')
-			chex = botutils.av_color('data/m/'+str(map['beatmapset_id'])+'.jpg')
-			if chex == -1: raise NameError('Fail color calc')
-		except Exception: chex = 0x42f442
+    wwr = "{:,}".format(user['pp_rank']).replace(",", "'")
+    cr  = "{:,}".format(user['pp_country_rank']).replace(",", "'")
+    embed.set_author(name = f"[{mode.upper()}] {user['username']} #{wwr} (#{cr} {utils.flag(user['country'])})", \
+                     url = f"https://osu.ppy.sh/u/{user['user_id']}", icon_url = f"https://a.ppy.sh/{user['user_id']}_api.jpg")
+    embed.set_thumbnail(url = f"https://a.ppy.sh/{user['user_id']}_api.jpg")
 
-		if mode == 'CTB mode': embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"] ["+mode+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-		else: embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-		if top != -1: embedz.set_author(name='Nouveau top #'+str(top+1)+' catch par '+str(user)+' :')
-		else: embedz.set_author(name='Nouveau récent catch par '+str(user)+' :')
-		embedz.set_thumbnail(url="https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg")
-		
-		embedz.add_field(name='Score', value=str(score)+'\n('+str(diff_rank)+', '+str(diff_pp)+'pp)', inline=True)
-		if top != -1: embedz.add_field(name='PP', value=str(play['pp']), inline=True)
-		embedz.add_field(name='Rank', value=emojis[str(play['rank']).lower()], inline=True)
-		embedz.add_field(name='Accuracy', value=str(acc), inline=True)
-		if int(play['perfect']) == 1: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/x'+str(bestplay['maxcombo'])+' ('+emojis['fc']+')', inline=True)
-		else: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/x'+str(bestplay['maxcombo']), inline=True)
-		try: embedz.add_field(name='Mods', value=str(mods_emoj), inline=True)
-		except Exception: embedz.add_field(name='Mods', value=str(mods_str), inline=True)
-		embedz.add_field(name='Stars', value=str(map['difficultyrating'])[:4]+"☆", inline=True)
-		# embedz.add_field(name='Hits [fruits/ticks/droplets/miss]', value=". . . . .[ "+str(play['count300'])+" / "+str(play['count100'])+" / "+str(play['count50'])+" / "+str(play['countmiss'])+" ]", inline=True)
-		embedz.add_field(name='Hits', value='Fruits: x'+str(play['count300'])+'\nTicks: x'+str(play['count100'])+'\nDroplets: x'+str(play['count50'])+'\nMiss: x'+str(play['countmiss']), inline=True)
-		embedz.add_field(name='Date', value=date+"\n", inline=True)
+    rs  = "{:,}".format(user['ranked_score']).replace(",", "'")
+    embed.add_field(name = "Ranked Score", value = rs)
+    embed.add_field(name = "Raw pp", value = user['pp_raw'])
+    embed.add_field(name = "Level", value = str(round(float(user['level']), 2)))
+    embed.add_field(name = "Accuracy", value = f"{round(float(user['accuracy']), 2)}%")
+    embed.add_field(name = "Play Count", value = user['playcount'])
+    embed.add_field(name = "Play Time", value = utils.parse_date(int(user['total_seconds_played'])))
 
-		Lmin, Lsec = divmod(int(map['total_length']), 60)
-		Smin, Ssec = divmod(int(map['hit_length']), 60)
-		passvalue = str(pass_value(str(map['passcount']), str(map['playcount'])))
-		info = ""
-		info += "Créateur : `{}` ID : `{}`\n".format(map['creator'], map['beatmap_id'])
-		info += "Durée: `{}:{}` (`{}:{}`)  BPM: `{}`  Combo: `{}`\n".format(Lmin, Lsec, Smin, Ssec, map['bpm'], bestplay['maxcombo'])
-		info += "CS: `{}`  AR: `{}`  OD: `{}`  HP: `{}`  Stars: `{}☆`\n".format(str(map['diff_size']), str(map['diff_approach']), str(map['diff_overall']), str(map['diff_drain']), str(map['difficultyrating'])[:4])
-		info += "Status: `{}`  Taux de réussite: `{}%`".format(map['approved'], passvalue[:4])
-		embedz.add_field(name='Map info', value=info, inline=True)
-		embedz.set_footer(text = signature, icon_url='https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png')
+    ranks = f"{EMOJIS['xh']} {user['count_rank_ssh']}\t{EMOJIS['x']} {user['count_rank_ss']}\t{EMOJIS['sh']} {user['count_rank_sh']}\t" + \
+            f"{EMOJIS['s']} {user['count_rank_s']}\t{EMOJIS['a']} {user['count_rank_a']}"
+    embed.add_field(name = "Grades", value = ranks, inline = False)
 
-		tracklist[user] = str(old_user_info[0])+'|'+str(new_rank)+'|'+str(new_pp)
-		with open('tracked_users_ctb', 'w') as myfile:
-			json.dump(tracklist, myfile)
-		if top != -1: print('[CTB] Play by : '+str(user)+', '+play['pp']+'pp')
-	except Exception as e:
-		print('In Print play ctb:')
-		print(e)
-		return -1
-	return embedz
+    embed.set_footer(text="Ici depuis", icon_url=ICON_URL)
+    embed.timestamp = utils.compute_time(user['join_date'])
 
-async def print_play_taiko(play, top, user):
-	map = await get_map(str(play['beatmap_id']), '1')
-	bestplay = await get_top_play(str(play['beatmap_id']), '1')
-	mode = ''
-	if map == -1:
-		mode = 'taiko mode'
-		map = await get_map(str(play['beatmap_id']), '1&a=1')
-		if map == -1:
-			mode = ''
-			return -1
-	mods_str, mods_emoj = get_mods(int(play['enabled_mods']))
-	with open('tracked_users_taiko', 'r') as myfile:
-		tracklist = json.load(myfile)
-		old_user_info = str(tracklist[user]).split('|')
-		old_rank = str(old_user_info[1])
-		old_pp = str(old_user_info[2])
-		new_user_inf, useless = await get_user_info(user, 'taiko')
-		new_rank = str(new_user_inf['pp_rank'])
-		new_pp = str(new_user_inf['pp_raw'])
-		diff_rank = int(int(old_rank) - int(new_rank))
-		if diff_rank >= 0: diff_rank = str('+'+str(diff_rank))
-		diff_pp = float(float(new_pp) - float(old_pp))
-		if diff_pp >= 0: diff_pp = str('+'+str(diff_pp))
-		diff_pp = str(diff_pp)[:5]
+    return embed
 
-	try:
-		date = str(compute_time(str(play['date'])))
-		if date == -1: date = str(play['date'])
-		acc = str(compute_acc(str(play['countmiss']), '0', '0', str(play['count100']), '0', str(play['count300']), 'taiko'))
-		if acc == '1.0': acc = '100 %'
-		else: acc = acc[2:][:2]+','+acc[4:][:2]+' %'
-		# time = str(calc_date(str(play['date'])))
-		score = "'".join(str(play['score'])[::-1][i:i+3] for i in range(0, len(str(play['score'])), 3))[::-1]
-		
-		try:
-			ret = await botutils.dl_image("https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg", str(map['beatmapset_id'])+'.jpg', 'm')
-			if ret == -1: raise NameError('Fail dl')
-			chex = botutils.av_color('data/m/'+str(map['beatmapset_id'])+'.jpg')
-			if chex == -1: raise NameError('Fail color calc')
-		except Exception: chex = 0x42f442
+def embed_map_info(beatmap, mode, mods) -> discord.Embed:
+    embed = discord.Embed(title = f"{beatmap['artist']} - {beatmap['title']} [{beatmap['version']}]", \
+                          url = f"https://osu.ppy.sh/b/{beatmap['beatmap_id']}")
+    embed.set_author(name = f"Créée par {beatmap['creator']} [{mode.upper()}]", url = f"https://osu.ppy.sh/u/{beatmap['creator_id']}", \
+                     icon_url = f"http://s.ppy.sh/a/{beatmap['creator_id']}")
+    embed.set_thumbnail(url = f"https://b.ppy.sh/thumb/{beatmap['beatmapset_id']}l.jpg")
 
-		if mode == 'taiko mode': embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"] ["+mode+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-		else: embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=chex)
-		if top != -1: embedz.set_author(name='Nouveau top #'+str(top+1)+' taiko par '+str(user)+' :')
-		else: embedz.set_author(name='Nouveau récent taiko par '+str(user)+' :')
-		embedz.set_thumbnail(url="https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg")
-		
-		embedz.add_field(name='Score', value=str(score)+'\n('+str(diff_rank)+', '+str(diff_pp)+'pp)', inline=True)
-		if top != -1: embedz.add_field(name='PP', value=str(play['pp']), inline=True)
-		embedz.add_field(name='Rank', value=emojis[str(play['rank']).lower()], inline=True)
-		embedz.add_field(name='Accuracy', value=str(acc), inline=True)
-		if int(play['perfect']) == 1: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/≈x'+str(bestplay['maxcombo'])+' ('+emojis['fc']+')', inline=True)
-		else: embedz.add_field(name='Combo', value='x'+str(play['maxcombo'])+'/≈x'+str(bestplay['maxcombo']), inline=True)
-		try: embedz.add_field(name='Mods', value=str(mods_emoj), inline=True)
-		except Exception: embedz.add_field(name='Mods', value=str(mods_str), inline=True)
-		embedz.add_field(name='Stars', value=str(map['difficultyrating'])[:4]+"☆", inline=True)
-		# embedz.add_field(name='Hits [great/good/miss]', value=". . . . .[ "+str(play['count300'])+" / "+str(play['count100'])+" / "+str(play['countmiss'])+" ]", inline=True)
-		embedz.add_field(name='Hits', value='Great: x'+str(play['count300'])+'\nGood: x'+str(play['count100'])+'\nMiss: x'+str(play['countmiss']), inline=True)
-		embedz.add_field(name='Date', value=date+"\n", inline=True)
+    dif = float(beatmap['difficultyrating'])
+    map_id = beatmap['beatmap_id']
+    objects = int(beatmap['count_normal']) + int(beatmap['count_slider']) + int(beatmap['count_spinner'])
+    maxcombo = beatmap['max_combo'] if mode == 'std' else get_top_play(beatmap['beatmap_id'], mode)['maxcombo']
 
-		Lmin, Lsec = divmod(int(map['total_length']), 60)
-		Smin, Ssec = divmod(int(map['hit_length']), 60)
-		passvalue = str(pass_value(str(map['passcount']), str(map['playcount'])))
-		info = ""
-		info += "Créateur : `{}` ID : `{}`\n".format(map['creator'], map['beatmap_id'])
-		info += "Durée: `{}:{}` (`{}:{}`)  BPM: `{}`  Combo: `≈{}`\n".format(Lmin, Lsec, Smin, Ssec, map['bpm'], bestplay['maxcombo'])
-		info += "CS: `{}`  AR: `{}`  OD: `{}`  HP: `{}`  Stars: `{}☆`\n".format(map['diff_size'], map['diff_approach'], map['diff_overall'], map['diff_drain'], map['difficultyrating'][:4])
-		info += "Status: `{}`  Taux de réussite: `{}%`".format(map['approved'], passvalue[:4])
-		embedz.add_field(name='Map info', value=info, inline=True)
-		embedz.set_footer(text = signature, icon_url='https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png')
+    desc = compute_map_info(beatmap, mode, maxcombo) + "\n\n"
 
-		tracklist[user] = str(old_user_info[0])+'|'+str(new_rank)+'|'+str(new_pp)
-		with open('tracked_users_taiko', 'w') as myfile:
-			json.dump(tracklist, myfile)
-		if top != -1: print('[taiko] Play by : '+str(user)+', '+play['pp']+'pp')
-	except Exception as e:
-		print('In Print play taiko:')
-		print(e)
-		return -1
-	return embedz
-	
-async def embed_map_info(map_id, mode, mods, acc, combo, miss):
-	map = await get_map(str(map_id), str(mode_value[mode]))
-	mods2 = []
-	if mode != 'std':
-		bestplay = await get_top_play(str(map_id), str(mode_value[mode]))
-		map['max_combo'] = bestplay['maxcombo']
-	if map == -1:
-		return -1
-	if combo == 0:
-		combo = int(map['max_combo'])
-	if mods != '0' and mods != None:
-		mods2 = [mods[i:i+2] for i in range(0, len(mods), 2)]
-	try:
-		if mode == 'std': # calc.map(URL, MODS, ACC, COMBO, MISS)
-			ppCust = calc.map('osu.ppy.sh/b/'+map_id, str(mods), float(acc), int(combo), int(miss))
-			pp100 = calc.map('osu.ppy.sh/b/'+map_id, str(mods), 100, int(combo), int(miss))
-			pp99 = calc.map('osu.ppy.sh/b/'+map_id, str(mods), 99, int(combo), int(miss))
-			pp97 = calc.map('osu.ppy.sh/b/'+map_id, str(mods), 97, int(combo), int(miss))
-			pp95 = calc.map('osu.ppy.sh/b/'+map_id, str(mods), 95, int(combo), int(miss))
-		if mode == 'mania': # mania_pp.pp(STARS, ACCURACY, NB_NOTE, SCORE, OD, MODS)
-			ppCust = mania_pp.pp(float(map['difficultyrating']), float(acc), int(map['count_normal'])+int(map['count_slider']), int(1000000*(acc/100)), float(map['diff_overall']), mods2)
-			pp100 = mania_pp.pp(float(map['difficultyrating']), 100, int(map['count_normal'])+int(map['count_slider']), int(1000000*(100/100)), float(map['diff_overall']), mods2)
-			pp99 = mania_pp.pp(float(map['difficultyrating']), 99, int(map['count_normal'])+int(map['count_slider']), int(1000000*(99/100)), float(map['diff_overall']), mods2)
-			pp97 = mania_pp.pp(float(map['difficultyrating']), 97, int(map['count_normal'])+int(map['count_slider']), int(1000000*(97/100)), float(map['diff_overall']), mods2)
-			pp95 = mania_pp.pp(float(map['difficultyrating']), 95, int(map['count_normal'])+int(map['count_slider']), int(1000000*(95/100)), float(map['diff_overall']), mods2)
-		if mode == 'ctb': # ctb_pp.pp(STARS, ACCURACY, MAX_COMBO, PLAYER_COMBO, MISS, AR, MODS)
-			ppCust = ctb_pp.pp(float(map['difficultyrating']), float(acc), int(map['max_combo']), int(combo), int(miss), float(map['diff_approach']), mods2)
-			pp100 = ctb_pp.pp(float(map['difficultyrating']), 100, int(map['max_combo']), int(combo), int(miss), float(map['diff_approach']), mods2)
-			pp99 = ctb_pp.pp(float(map['difficultyrating']), 99, int(map['max_combo']), int(combo), int(miss), float(map['diff_approach']), mods2)
-			pp97 = ctb_pp.pp(float(map['difficultyrating']), 97, int(map['max_combo']), int(combo), int(miss), float(map['diff_approach']), mods2)
-			pp95 = ctb_pp.pp(float(map['difficultyrating']), 95, int(map['max_combo']), int(combo), int(miss), float(map['diff_approach']), mods2)
-		if mode == 'taiko': # taiko_pp.pp(STARS, ACCURACY, MAX_COMBO, MISS, OD, MODS)
-			ppCust = taiko_pp.pp(float(map['difficultyrating']), float(acc), int(map['max_combo']), int(miss), float(map['diff_overall']), mods2)
-			pp100 = taiko_pp.pp(float(map['difficultyrating']), 100, int(map['max_combo']), int(miss), float(map['diff_overall']), mods2)
-			pp99 = taiko_pp.pp(float(map['difficultyrating']), 99, int(map['max_combo']), int(miss), float(map['diff_overall']), mods2)
-			pp97 = taiko_pp.pp(float(map['difficultyrating']), 97, int(map['max_combo']), int(miss), float(map['diff_overall']), mods2)
-			pp95 = taiko_pp.pp(float(map['difficultyrating']), 95, int(map['max_combo']), int(miss), float(map['diff_overall']), mods2)
+    if mode == 'std': # std_pp(URL, MODS, ACC, COMBO, 100, 50, MISS)
+        pp100 = std_pp.map(f"osu.ppy.sh/b/{map_id}", mods, 100, maxcombo, 0, 0, 0)
+        pp99  = std_pp.map(f"osu.ppy.sh/b/{map_id}", mods, 99,  maxcombo, 0, 0, 0)
+        pp97  = std_pp.map(f"osu.ppy.sh/b/{map_id}", mods, 97,  maxcombo, 0, 0, 0)
+        pp95  = std_pp.map(f"osu.ppy.sh/b/{map_id}", mods, 95,  maxcombo, 0, 0, 0)
+    if mode == 'taiko': # taiko_pp(MODS, STARS, OD, MAX_COMBO, ACCURACY, MISS)
+        pp100 = taiko_pp(mods, dif, float(beatmap['diff_overall']), maxcombo, 100, 0)
+        pp99  = taiko_pp(mods, dif, float(beatmap['diff_overall']), maxcombo, 99,  0)
+        pp97  = taiko_pp(mods, dif, float(beatmap['diff_overall']), maxcombo, 97,  0)
+        pp95  = taiko_pp(mods, dif, float(beatmap['diff_overall']), maxcombo, 95,  0)
+    if mode == 'ctb': # ctb_pp(MODS, STARS, AR, MAX_COMBO, COMBO, ACCURACY, MISS)
+        pp100 = ctb_pp(mods, dif, float(beatmap['diff_approach']), maxcombo, maxcombo, 100, 0)
+        pp99  = ctb_pp(mods, dif, float(beatmap['diff_approach']), maxcombo, maxcombo, 99,  0)
+        pp97  = ctb_pp(mods, dif, float(beatmap['diff_approach']), maxcombo, maxcombo, 97,  0)
+        pp95  = ctb_pp(mods, dif, float(beatmap['diff_approach']), maxcombo, maxcombo, 95,  0)
+    if mode == 'mania': # mania_pp(MODS, STARS, OD, SCORE, OBJECTS)
+        pp100 = mania_pp(mods, dif, float(beatmap['diff_overall']), 1000000, objects)
+        pp99  = mania_pp(mods, dif, float(beatmap['diff_overall']), 990000,  objects)
+        pp97  = mania_pp(mods, dif, float(beatmap['diff_overall']), 970000,  objects)
+        pp95  = mania_pp(mods, dif, float(beatmap['diff_overall']), 950000,  objects)
 
-		Lmin, Lsec = divmod(int(map['total_length']), 60)
-		Smin, Ssec = divmod(int(map['hit_length']), 60)
-		passvalue = str(pass_value(str(map['passcount']), str(map['playcount'])))
-		embedz = discord.Embed(title=f"{str(map['artist'])} - {str(map['title'])} [{str(map['version'])}]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=0xf4f442)
-		embedz.set_author(name=f"Créé par {str(map['creator'])} [{mode.upper()}]")
-		embedz.set_thumbnail(url="https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg")		
-		info = ""
-		info += f"Durée: `{Lmin}:{Lsec}` (`{Smin}:{Ssec}`)  BPM: `{map['bpm']}`  Combo: `{map['max_combo']}`\n"
-		if mode != 'mania':
-			info += f"CS: `{map['diff_size']}`  AR: `{map['diff_approach']}`  OD: `{map['diff_overall']}`  HP: `{map['diff_drain']}`  Stars: `{map['difficultyrating'][:4]}☆`\n"
-		else:
-			info += f"Keys: `{map['diff_size']}`  OD: `{map['diff_overall']}`  HP: `{map['diff_drain']}`  Stars: `{map['difficultyrating'][:4]}☆`\n"
-		info += f"Status: `{map['approved']}`  Taux de réussite: `{passvalue[:4]}%`\n\n"
-		if mods != '0':
-			info += f"Avec mods : `{mods}`\n"
-		if acc != 0:
-			info += f"{acc}%: `{ppCust}pp`\n"
-		else:
-			info += f"95%: `{pp95}pp` 97%: `{pp97}pp` 99%: `{pp99}pp` 100%: `{pp100}pp`\n"
-		embedz.description = info
-		embedz.set_footer(text = signature, icon_url='https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png')
-		return embedz
-	except Exception as e:
-		print('error in embed map info')
-		print(e)
-			
+    desc += f"Avec mods: `{' '.join(mods)}`"
+    desc += f"95%: `{round(pp95)}pp` 97%: `{round(pp97)}pp` 99%: `{round(pp99)}pp` 100%: `{round(pp100)}pp`"
 
-async def file_replay(play):
-	mode = ''
-	try:
-		map = await get_map_hash(str(play.beatmap_hash))
-		if str(play.game_mode) == 'GameMode.Standard': mode = 'std'
-		elif str(play.game_mode) == 'GameMode.Osumania': mode = 'mania'
-		elif str(play.game_mode) == 'GameMode.CatchTheBeat': mode = 'ctb'
-		elif str(play.game_mode) == 'GameMode.Taiko': mode = 'taiko'
-		user, useless = await get_user_info(str(play.player_name), mode, 0)
+    embed.description = desc
+    embed.set_footer(text = "Mise à jour le/à", icon_url = ICON_URL)
+    embed.timestamp = utils.compute_time(beatmap['last_updated'])
 
-		if mode != 'std':
-			bestplay = await get_top_play(str(map['beatmap_id']), str(mode_value[mode]))
-			map['max_combo'] = bestplay['maxcombo']
+    return embed
 
-		mods = (str(play.mod_combination).split(' ')[1])[:-3]
-		mods_str, mods_emoj = get_mods(int(mods))
-		date = str(compute_time(str(play.timestamp)))
-		acc = str(compute_acc(str(play.misses), str(play.number_50s), str(play.katus), str(play.number_100s), str(play.gekis), str(play.number_300s), mode))
-		rank = str(compute_rank(int(play.number_300s), int(play.gekis), int(play.number_100s), int(play.katus), int(play.number_50s), int(play.misses), float(acc), str(mods_str), mode))
-		score = "'".join(str(play.score)[::-1][i:i+3] for i in range(0, len(str(play.score)), 3))[::-1]
-		if mode == 'std': # calc.map(URL, MODS, ACC, COMBO, MISS)
-			playerPP = calc.map('osu.ppy.sh/b/'+map['beatmap_id'], mods_str, float(acc)*100, int(play.max_combo), int(play.misses))
-			mapPP = calc.map('osu.ppy.sh/b/'+map['beatmap_id'], mods_str, 100, int(map['max_combo']), 0)
-		if mode == 'mania': # mania_pp.pp(STARS, ACCURACY, NB_NOTE, SCORE, OD, MODS)
-			playerPP = mania_pp.pp(float(map['difficultyrating']), float(acc)*100, int(map['count_normal'])+int(map['count_slider']), int(play.score), float(map['diff_overall']), mods_str)
-			mapPP = mania_pp.pp(float(map['difficultyrating']), 100, int(map['count_normal'])+int(map['count_slider']), 1000000, float(map['diff_overall']), mods_str)
-		if mode == 'ctb': # ctb_pp.pp(STARS, ACCURACY, MAX_COMBO, PLAYER_COMBO, MISS, AR, MODS)
-			playerPP = ctb_pp.pp(float(map['difficultyrating']), float(acc)*100, int(map['max_combo']), int(play.max_combo), int(play.misses), float(map['diff_approach']), mods_str)
-			mapPP = ctb_pp.pp(float(map['difficultyrating']), 100, int(map['max_combo']), int(map['max_combo']), 0, float(map['diff_approach']), mods_str)
-		if mode == 'taiko': # taiko_pp.pp(STARS, ACCURACY, MAX_COMBO, MISS, OD, MODS)
-			playerPP = taiko_pp.pp(float(map['difficultyrating']), float(acc)*100, int(map['max_combo']), int(play.misses), float(map['diff_overall']), mods_str)
-			mapPP = taiko_pp.pp(float(map['difficultyrating']), 100, int(map['max_combo']), 0, float(map['diff_overall']), mods_str)
-		if acc == '1.0':
-			acc = '100%'
-		else:
-			acc = acc[2:][:2]+','+acc[4:][:2]+'%'
+def embed_mapset_info(mapset, mode) -> discord.Embed:
+    embed = discord.Embed(title = f"{mapset[0]['artist']} - {mapset[0]['title']} {f'[{mode.upper()}]' if mode != '' else ''}")
+    embed.set_author(name = f"Créé par {mapset[0]['creator']}", url = f"https://osu.ppy.sh/u/{mapset[0]['creator_id']}", \
+                     icon_url = f"http://s.ppy.sh/a/{beatmap[0]['creator_id']}")
 
-		embedz = discord.Embed(title=str(map['title'])+" ["+str(map['version'])+"]", url='https://osu.ppy.sh/b/'+str(map['beatmap_id']), color=0x42f442)
-		embedz.set_author(name=f"Play [{mode}] par {str(play.player_name)} :", icon_url='https://a.ppy.sh/'+str(user['user_id'])+'_api.jpg')
-		embedz.set_thumbnail(url="https://b.ppy.sh/thumb/"+str(map['beatmapset_id'])+"l.jpg")
-		
-		descN = f"{emojis[str(rank).lower()]}   {str(score)}   ({acc})   {str(play.timestamp)[:-7]}"
-		desc = f"{playerPP}pp/{mapPP}pp   {play.max_combo}x/{map['max_combo']}x    [ {play.number_300s} / {play.number_100s} / {play.number_50s} / {play.misses} ]"
-		graph = compute_graph(play.life_bar_graph)
+    desc = ""
+    for i, beatmap in enumerate(mapset):
+        dif = float(beatmap['difficultyrating'])
+        maxcombo = beatmap['max_combo'] if mode == 'std' else get_top_play(beatmap['beatmap_id'], mode)['maxcombo']
+        objects = int(beatmap['count_normal']) + int(beatmap['count_slider']) + int(beatmap['count_spinner'])
 
-		embedz.add_field(name=descN, value=desc, inline=True)
-		embedz.add_field(name='Life Graph', value='```'+graph+'```', inline=True)
-		embedz.set_footer(text=signature, icon_url='https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png')
-		return embedz
-	except Exception as e:
-		print('error in embed parsed file')
-		print(e)
-		return -1
+        if mode == 'std': max_pp = std_pp.map(f"osu.ppy.sh/b/{beatmap['beatmap_id']}", [], 100, maxcombo, 0, 0, 0)
+        if mode == 'taiko': max_pp = taiko_pp([], dif, int(beatmap['diff_overall']), maxcombo, 100, 0)
+        if mode == 'ctb': max_pp = ctb_pp([], dif, int(beatmap['diff_approach']), maxcombo, maxcombo, 100, 0)
+        if mode == 'mania': max_pp = mania_pp([], dif, int(beatmap['diff_overall']), 1000000, objects)
 
+        to_add = f"[{utils.MODE_IND[beatmap['mode']]}] {round(dif, 2)}☆ - {beatmap['version']} ({round(max_pp)}pp)\n"
 
-async def get_top_play(map_id, mode):
-	async with aiohttp.ClientSession() as session:
-		async with session.get(f'https://osu.ppy.sh/api/get_scores?k={key}&b={map_id}&m={mode}&limit=1') as r:
-			vari.stats['api_usage'] += 1
-			raw_r = await r.text()
-			if len(raw_r) > 4:
-				try:
-					jr = json.loads(raw_r)
-				except Exception as e:
-					print("error in get top "+reversed_mode_value[mode])
-					print(e)
-					return -1
-				return jr[0]
-	return -1
+        if len(desc) + len(to_add) <= 2048: desc += to_add
+        else:
+            amout = len(mapset) - i
+            desc += f"\\> *...{amout} autre{'s' if amout > 1 else ''}...*"
+            break
 
-	
-async def get_map(map_id, mode):
-	async with aiohttp.ClientSession() as session:
-		async with session.get(f'https://osu.ppy.sh/api/get_beatmaps?k={key}&b={map_id}&m={mode}') as r:
-			vari.stats['api_usage'] += 1
-			raw_r = await r.text()
-			if len(raw_r) > 4:
-				try:
-					jr = json.loads(raw_r)
-				except Exception as e:
-					print("in get_map"+reversed_mode_value[mode])
-					print(e)
-					return -1
-				return jr[0]
-	return -1	
+    embed.description = desc
+    embed.set_footer(text = "Mise à jour le/à", icon_url = ICON_URL)
+    embed.timestamp = utils.compute_time(mapset['last_updated'])
 
-async def get_map_hash(hash_map):
-	async with aiohttp.ClientSession() as session:
-		async with session.get(f'https://osu.ppy.sh/api/get_beatmaps?k={key}&h={str(hash_map)}') as r:
-			vari.stats['api_usage'] += 1
-			raw_r = await r.text()
-			if len(raw_r) > 4:
-				try:
-					jr = json.loads(raw_r)
-				except Exception as e:
-					print('in get_map_hash')
-					print(e)
-					return -1
-				return jr[0]
-	return -1
+    return embed
+
+def compute_hits(hits, mode) -> str:
+    c0, c50, ckatu, c100, cgeki, c300 = hits
+    formated_hits = ""
+    if mode == 'std': formated_hits = f"{EMOJIS['300']} x{c300} / {EMOJIS['100']} x{c100}\n" + \
+                                      f"{EMOJIS['50']} x{c50} / {EMOJIS['0']} x{c0}"
+    if mode == 'ctb': formated_hits = f"Fruits: x{c300}\nTicks: x{c100}\nDroplets: x{c50}\nMiss: x{c0}"
+    if mode == 'mania': formated_hits = f"{EMOJIS['300']} x{c300} / {EMOJIS['max']} x{cgeki}\n" + \
+                                        f"{EMOJIS['200']} x{ckatu} / {EMOJIS['100']} x{c100}\n" + \
+                                        f"{EMOJIS['50']} x{c50} / {EMOJIS['0']} x{c0}"
+    if mode == 'taiko': formated_hits = f"Great: x{c300}\nGood: x{c100}\nMiss: x{c0}"
+
+    return formated_hits
+
+def compute_acc(hits, mode) -> float:
+    c0, c50, ckatu, c100, cgeki, c300 = hits
+    c0, c50, ckatu, c100, cgeki, c300 = int(c0), int(c50), int(ckatu), int(c100), int(cgeki), int(c300)
+    acc = 1
+    if mode == 'std': acc = float( (c50*50 + c100*100 + c300*300) / (c0 + c50 + c100 + c300) * 300 )
+    if mode == 'ctb': acc = float( (c50 + c100 + c300) / (c0 + ckatu + c50 + c100 + c300) )
+    if mode == 'mania': acc = float( (c50*50+c100*100+ckatu*200+(c300+cgeki)*300) / ((c0+c50+c100+ckatu+c300+cgeki)*300) )
+    if mode == 'taiko': acc = float( (0.5 * c100 + c300) / (c0 + c100 + c300) )
+    return round(acc*100, 2)
+
+def compute_mods(mods) -> (str, str):
+    if mods <= 0: return '0', '∅'
+    mod_list = ['NF', 'EZ', 'NV', 'HD', 'HR', 'SD', 'DT', 'RX', 'HT', 'NC', 'FL', 'AP', 'SO', 'AP', 'PF', '4K', '5K', '6K', '7K', '8K', 'KM', 'FI', 'RD', 'LM', 'FM', '9K', '10K', '1K', '3K', '2K']
+    bin_list = [int(x) for x in bin(mods)[2:]]
+    mods, mods_str = [], ''
+    for i, y in enumerate(reversed(bin_list)):
+        if y == 1 and mod_list[i] not in ['NC', 'PF']:
+            try: mods_str += EMOJIS[mod_list[i].lower()]
+            except KeyError: mods_str += mod_list[i]
+            mods.append(mod_list[i])
+    return mods, mods_str
+
+def compute_map_info(beatmap, mode, maxcombo) -> str:
+    Lmin, Lsec = divmod(int(beatmap['total_length']), 60)   
+    Smin, Ssec = divmod(int(beatmap['hit_length']), 60)
+    info = ""
+    info += f"Créateur : `{beatmap['creator']}` ID : `{beatmap['beatmap_id']}`\n"
+    info += f"Durée: `{Lmin}:{Lsec}` (`{Smin}:{Ssec}`) BPM: `{beatmap['bpm']}` Combo: `{('≈' if mode != 'std' else '') + maxcombo}`\n"
+    if mode != 'mania': info += f"CS: `{beatmap['diff_size']}` AR: `{beatmap['diff_approach']}` OD: `{beatmap['diff_overall']}` HP: `{beatmap['diff_drain']}`"
+    else: info += f"Keys: `{beatmap['diff_size']}` OD: `{beatmap['diff_overall']}` HP: `{beatmap['diff_drain']}`"
+    info += f"Stars: `{round(float(beatmap['difficultyrating']), 2)}☆`\n"
+    info += f"Status: `{beatmap['approved']}` Taux de réussite: `{pass_value(int(beatmap['passcount']), int(beatmap['playcount']))}%`"
+
+    return info
 
 def pass_value(passcount, playcount):
-	try:
-		if int(passcount) != 0 and int(playcount) != 0:
-			passvalue = str(float(int(passcount) / int(playcount) * 100))
-		else:
-			passvalue = '0'
-	except Exception as e:
-		print('error calculate % pass')
-		print(e)
-	return passvalue
-	
-def get_mods(number):
-	try:
-		mod_list = ['NF', 'EZ', 'NV', 'HD', 'HR', 'SD', 'DT', 'RX', 'HT', 'NC', 'FL', 'AutoPlay', 'SO', 'AP', 'PF', '4K', '5K', '6K', '7K', '8K', 'KM', 'FI', 'RanD', 'LM', 'FM', '9K', '10K', '1K', '3K', '2K']
-		if number <= 0:
-			return '0', '∅'
-		bin_list = [int(x) for x in bin(number)[2:]]
-		i=0
-		mod_str = ''
-		mod_emoj = ''
-		for y in reversed(bin_list):
-			if y == 1 and mod_list[i] != 'NC':
-				mod_str += mod_list[i]
-				mod_emoj += emojis[str(mod_list[i]).lower()]
-			i+=1
-	except Exception as e:
-		print('[!ERROR!] in get_mods:')
-		print(e)
-		return '0', '!N/A!'
-	return mod_str, mod_emoj
+    if passcount == 0 or playcount == 0: return 0
+    return round(float(passcount / playcount * 100), 1)
 
-def compute_time(todate):
-	try:
-		h = int(todate[11:][:2])
-		h = h+1
-		day = str(todate[:10])
-		min = str(todate[14:])
-		date = day+' '+str(h)+':'+min
-	except Exception as e:
-		print('error in date calc')
-		print(e)
-		return -1
-	return date
+def taiko_pp(mods, sr, od, max_combo, acc, miss) -> float:
+    if 'EZ' in mods: od /= 2
+    if 'HR' in mods: od *= 1.4
+    od = max(min(od, 10), 0)
+    od = int(20 + (50 - 20) * od / 10) - 0.5
+    if 'HT' in mods: od /= 0.75
+    if 'DT' in mods: od /= 1.5
+    od = round(od * 100) / 100
 
+    combo = max_combo - miss
 
-def compute_graph(data):
-	a = (str(data)[:-1]).split(',')
-	if len(a) >= 35: mult = (len(a)-35)/len(a) 
-	else: mult = (35-len(a))/35
-	j = 0
-	life = []
-	for i in range(len(a)):
-		if len(a) >= 35: 
-			j += mult
-			if j < 1:
-				l = str(a[i]).split('|')[1]
-				life.append(l)
-			else: j -= 1
-		else:
-			l = str(a[i]).split('|')[1]
-			life.append(l)
-			j += mult
-			if j > 1:
-				life.append(l)
-				j -= 1
+    sr_value = pow(max(1, sr / 0.0075) * 5 - 4,2) / 100000
+    lenght_bonus = min(1, max_combo / 1500) * 0.1 + 1
+    sr_value *= lenght_bonus
+    sr_value *= pow(0.985, miss)
+    sr_value *= min(pow(combo, 0.5) / pow(max_combo, 0.5), 1)
+    sr_value *= acc / 100
+    acc_value = pow(150 / od, 1.1) * pow(acc / 100, 15) * 22
+    acc_value *= min(pow(max_combo / 1500, 0.3), 1.15)
+    mod_mult = 1.10
+    if 'HD' in mods:
+        mod_mult *= 1.10
+        sr_value *= 1.025
+    if 'NF' in mods: mod_mult *= 0.90
+    if 'FL' in mods: sr_value *= 1.05 * lenght_bonus
+    total = pow(pow(sr_value, 1.1) + pow(acc_value, 1.1), 1 / 1.1) * mod_mult
+    return round(total * 100) / 100
 
-	if len(life) == 35: k = 35
-	elif len(life) > 35: k = 36
-	else: k = len(life)
-	graph = ''
-	for i in range(1, 6):
-		for j in range(0, k):
-			n = float(life[j])
-			if n >= 1-i*0.2: graph += '█'
-			else: graph += ' '
-		graph += '\n'
+def ctb_pp(mods, sr, ar, max_combo, combo, acc, miss) -> float:
+    if 'DT' in mods:
+        ms = 200 + (11 - ar) * 100 if ar > 5 else 800 + (5 - ar) * 80
+        if ms < 300: ar = 11
+        elif ms < 1200: ar = round((11 - (ms - 300) / 150) * 100) / 100
+        else: ar = round((5 - (ms - 1200) / 120) * 100) / 100
+    if 'HT' in mods:
+        ms = 400 + (11 - ar) * 200 if ar > 5 else 1600 + (5 - ar) * 160
+        if ms < 600: ar = 10
+        elif ms < 1200: ar = round((11 - (ms - 300) / 150) * 100) / 100
+        else: ar = round((5 - (ms - 1200) / 120) * 100) / 100
 
-	return graph[:-1]	
+    final = pow(((5 * sr / 0.0049) - 4), 2) / 100000
+    lenght_bonus = (0.95 + 0.3 * min(1, max_combo / 2500) + (log10(max_combo / 2500) * 0.475 if max_combo > 2500 else 0))
+    final *= lenght_bonus
+    final *= pow(0.97, miss)
+    final *= pow(combo / max_combo, 0.8)
+    arbonus = 1
+    if ar > 9:  arbonus += 0.1 * (ar - 9.0)
+    if ar > 10: arbonus += 0.1 * (ar - 10.0)
+    if ar < 8:  arbonus += 0.025 * (8.0 - ar)
+    final *= arbonus
+    hiddenbonus = 1.01 + 0.04 * (11 - min(11, ar)) if ar > 10 else 1.05 + 0.075 * (10 - ar)
+    final *= pow(acc / 100, 5.5)
 
+    if 'HD' in mods and 'FL' in mods: return round(100 * final * 1.35 * lenght_bonus * hiddenbonus) / 100
+    if 'FL' in mods: return round(100 * final * 1.35 * lenght_bonus) / 100
+    if 'HD' in mods: return round(100 * final * hiddenbonus) / 100
+    return round(100 * final) / 100
 
-def compute_rank(c300, cgeki, c100, ckatu, c50, c0, acc, mods, mode):
-	if mode == 'std':
-		cgeki = 0
-		ckatu = 0
-	tot = c300 + cgeki + c100 + ckatu + c50 + c0
+def mania_pp(mods, sr, od, score, objects) -> float:
+    nerfpp = (0.5 if 'EZ' in mods else 1) * (0.9 if 'NF' in mods else 1)
+    nerfod = 0.5 if 'EZ' in mods else 1
 
-	if mode == 'mania':
-		c300 += cgeki
-		c100 += ckatu
-	if mode == 'ctb':
-		c300 += c50
-		c0 += ckatu
-	if mode == 'taiko':
-		c50 = 0
+    if score < 500000: return 0
 
-	if acc*100 == 1: rank = 'X'
-	elif c300 > 0.9*tot and c50 < 0.01*tot and c0 == 0: rank = 'S'
-	elif (c300 > 0.8*tot and c0 == 0) or (c300 > 0.9*tot): rank = 'A'
-	elif (c300 > 0.7*tot and c0 == 0) or (c300 > 0.8*tot): rank = 'B'
-	elif c300 > 0.6*tot: rank= 'C'
-	else: rank = 'D'
+    sb = pow(5 * max(1, sr / 0.2) - 4, 2.2) / 135 * (1 + 0.1 * min(1, objects / 1500))
+    if score < 500000: sm = score / 500000 * 0.1
+    elif score < 600000: sm = (score - 500000) / 100000 * 0.3
+    elif score < 700000: sm = (score - 600000) / 100000 * 0.25 + 0.3
+    elif score < 800000: sm = (score - 700000) / 100000 * 0.2 + 0.55
+    elif score < 900000: sm = (score - 800000) / 100000 * 0.15 + 0.75
+    else: sm = (score - 900000) / 100000 * 0.1 + 0.9
+    av = od * nerfod * 0.02 * sb * pow((score - 960000) / 40000, 1.1) if score >= 960000 else 0
 
-	if 'HD' in mods or 'FL' in mods:
-		if rank == 'SS': rank = 'XH'
-		if rank == 'S': rank = 'SH'
-
-	return rank
-
-
-# mania : 50 = bad (50) / 100 = good (100) / miss = miss (0) / katu = great (200) / geki = excellent (max) / 300 = excellent (300)
-def compute_acc(cmiss, c50, ckatu, c100, cgeki, c300, mode):
-	try:
-		if mode == 'std':
-			acc = str(float((int(c50)*50 + int(c100)*100 + int(c300)*300) / ((int(cmiss)+int(c50)+int(c100)+int(c300))*300)))
-		elif mode == 'ctb':
-			acc = str(float((int(c50) + int(c100) + int(c300)) / (int(cmiss) + int(ckatu) + int(c50) + int(c100) + int(c300))))
-		elif mode == 'mania':
-			acc = str(float((int(c50)*50+int(c100)*100+int(ckatu)*200+(int(c300)+int(cgeki))*300)/((int(cmiss)+int(c50)+int(c100)+int(ckatu)+int(c300)+int(cgeki))*300)))
-		elif mode == 'taiko':
-			acc = str(float((0.5 * int(c100) + int(c300)) / (int(cmiss) + int(c100) + int(c300))))
-	except Exception as e:
-		print('[!ERROR!] in compute_acc_'+mode+':')
-		print(e)
-		return 'unkwn'
-	return acc	
-	
-	
-async def get_user_info(user, mode, limit=5):
-	try:
-		async with aiohttp.ClientSession() as session:
-			async with session.get(f'https://osu.ppy.sh/api/get_user?k={key}&m={str(mode_value[mode])}&u={str(user).lower()}') as r:
-				vari.stats['api_usage'] += 1
-				raw_r = await r.text()
-				if len(raw_r) > 4:
-					jr = json.loads(raw_r)
-				
-			async with session.get(f'https://osu.ppy.sh/api/get_user_best?k={key}&m={str(mode_value[mode])}&u={str(user).lower()}&limit={str(limit)}') as r:
-				vari.stats['api_usage'] += 1
-				raw_p = await r.text()
-				if len(raw_p) > 4:
-					jp = json.loads(raw_p)
-				
-			return jr[0], jp
-	except Exception as e:
-		print("in get_user_info_"+mode+":")
-		print(e)
-		return -1
-	return -1
-	
-async def embed_user_info(user, mode, plays):
-	# ----- Compute color and create embed obj ----- #
-	try:
-		try:
-			ret = await botutils.dl_image('https://a.ppy.sh/'+str(user['user_id'])+'_api.jpg', str(user['user_id'])+'.jpg', 'u')
-			if ret == -1:
-				raise NameError('Fail dl')
-			chex = botutils.av_color('data/u/'+str(user['user_id'])+'.jpg')
-			if chex == -1:
-				raise NameError('Fail color calc')
-			embed=discord.Embed(title="https://osu.ppy.sh/u/"+str(user['user_id']), url='https://osu.ppy.sh/u/'+str(user['user_id']), color=chex)
-		except Exception as e:
-			print('In embed user info')
-			print(e)
-			embed=discord.Embed(title="https://osu.ppy.sh/u/"+str(user['user_id']), url='https://osu.ppy.sh/u/'+str(user['user_id']))
-		embed.set_author(name='Profil de '+str(user['username'])+' :')
-		embed.set_thumbnail(url='https://a.ppy.sh/'+str(user['user_id'])+'_api.jpg')
-		# ----- Try digit sep World wide rank ----- #
-		try:
-			wwr = "'".join(str(user['pp_rank'])[::-1][i:i+3] for i in range(0, len(str(user['pp_rank'])), 3))[::-1]
-			embed.add_field(name="World Wide Rank", value="#"+wwr, inline=True)
-		except Exception as e:
-			print('[!Error!] in wwr digit separation')
-			print(e)
-			embed.add_field(name="World Wide Rank", value="#"+str(user['pp_rank']), inline=True)
-		embed.add_field(name="Raw pp", value=str(user['pp_raw']), inline=True)
-		# ----- Try digit sep Country rank ----- #
-		try:
-			cr = "'".join(str(user['pp_country_rank'])[::-1][i:i+3] for i in range(0, len(str(user['pp_country_rank'])), 3))[::-1]
-			embed.add_field(name="Country Rank", value="#"+cr+' '+botutils.flag(str(user['country']).upper()), inline=True)
-		except Exception as e:
-			print('[!Error!] in cr digit separation')
-			print(e)
-			embed.add_field(name="Country Rank", value="#"+str(user['pp_country_rank'])+' '+botutils.flag(str(user['country'])), inline=True)
-		embed.add_field(name="Level", value=str(user['level'])[:5], inline=True)
-		# ----- Try digit sep Playcount ------ #
-		try:
-			playcount = " ".join(str(user['playcount'])[::-1][i:i+3] for i in range(0, len(str(user['playcount'])), 3))[::-1]
-			embed.add_field(name="Play count", value=str(playcount), inline=True)
-		except Exception as e:
-			print('[!Error!] in playcount digit separation')
-			print(e)
-			embed.add_field(name="Play count", value=str(user['playcount']), inline=True)
-		embed.add_field(name="Accuracy", value=str(user['accuracy'])[:5]+" %", inline=True)
-		
-		topplays = ''
-		for i in range(len(plays)):
-			map = await get_map(str(plays[i]['beatmap_id']), str(mode_value[mode]))
-			if map == -1:
-				map = await get_map(str(plays[i]['beatmap_id']), str(mode_value[mode])+'&a=1')
-
-			acc = str(compute_acc(str(plays[i]['countmiss']), str(plays[i]['count50']), str(plays[i]['countkatu']), str(plays[i]['count100']), str(plays[i]['countgeki']), str(plays[i]['count300']), mode))
-			if acc != '1.0':
-				acc = acc[2:][:2]+','+acc[4:][:2]+'%'
-			else:
-				acc = '100%'
-			mods_str, mods_emoj = get_mods(int(plays[i]['enabled_mods']))
-			if float(plays[i]['pp']) - float(int(float(plays[i]['pp']))) >= 0.5:
-				pp = int(float(plays[i]['pp']))+1
-			else:
-				pp = int(float(plays[i]['pp']))
-
-			topplays += f">**{str(pp)}pp** {emojis[str(plays[i]['rank']).lower()]} {str(map['title'])} ({str(map['difficultyrating'])[:4]}☆) {str(mods_emoj)} {acc}\n"
-		
-		embed.add_field(name="Tops plays", value=topplays, inline= True)
-		embed.set_footer(text = signature, icon_url='https://raw.githubusercontent.com/ppy/osu-resources/51f2b9b37f38cd349a3dd728a78f8fffcb3a54f5/osu.Game.Resources/Textures/Menu/logo.png')
-		return embed
-	except Exception as e:
-		print('[!ERROR!] in embed_user_info:')
-		print(e)
-		return -1
+    return round((0.73 * pow(pow(av, 1.1) + pow(sb * sm, 1.1), 1 / 1.1) * 1.1 * nerfpp), 2)
